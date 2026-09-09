@@ -1,12 +1,26 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Optional
 
 
 @dataclass
 class AppConfig:
+    # Path to YOLO model
     model_path: str = "models/best.pt"
-    window_title_re: str = ".*LDPlayer.*"
+
+    # ADB connection
+    # Examples:
+    #   "emulator-5554"          (local emulator)
+    #   "192.168.1.10:5555"      (wireless ADB to phone)
+    #   None / ""                (auto-detect first device)
+    adb_device: Optional[str] = None
+
+    # YOLO confidence threshold
     conf: float = 0.5
-    gpu: bool = True
+
+    # Use GPU for YOLO / EasyOCR (set False on most VPS – they have no GPU)
+    gpu: bool = False
+
+    # Retry attempts for detections
     max_retries: int = 4
 
     # YOLO class labels used across the bot

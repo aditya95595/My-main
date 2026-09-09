@@ -1,14 +1,13 @@
-# Core computer vision and ML
+# Core computer vision and ML – tested on Oracle Ampere A1 (ARM64)
 ultralytics>=8.0.0
 opencv-python-headless>=4.8.0
 numpy>=1.24.0
 easyocr>=1.7.0
 
-# Optional: for GUI on a desktop / with Xvfb
-# tkinter is part of the standard library on most systems
-
-# Optional keyboard hotkey (only works when a real keyboard is available)
+# Optional (only if you have a real keyboard attached)
 # keyboard>=0.13.5
 
-# Standard library used:
-# - logging, os, sys, threading, time, queue, subprocess, dataclasses
+# Notes for Oracle Cloud:
+# - Use Python 3.10 or 3.11
+# - gpu=False is already the default in config.py
+# - 12 GB RAM is the practical minimum for continuous farming

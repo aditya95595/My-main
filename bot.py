@@ -10,8 +10,8 @@ logger = logging.getLogger(__name__)
 
 class CocBot:
     """
-    Core farming bot. Preserves the exact notebook logic but wraps it in a
-    thread-safe class with graceful stop support and GUI queue messaging.
+    Core farming bot. Preserves the original logic but works with ADB coordinates
+    (device-relative, no win_left/win_top offset needed).
     """
 
     def __init__(
@@ -31,16 +31,13 @@ class CocBot:
         self._stop_event = threading.Event()
         self._thread = None
 
+        # Make sure automation uses the same device
+        if hasattr(self.window, "device_serial") and self.window.device_serial:
+            self.auto.set_device(self.window.device_serial)
+
     # ---- Public lifecycle ----
 
     def start(self, targets, goals):
-        """
-        Start the farm loop in a daemon thread.
-
-        Args:
-            targets: tuple (gtarget, etarget, detarget) — minimum resources to attack
-            goals:   tuple (g_goal, e_goal, de_goal) — total resources to farm before stopping
-        """
         if self._thread and self._thread.is_alive():
             self._log("Bot is already running")
             return
@@ -56,7 +53,6 @@ class CocBot:
         self._log("Bot started")
 
     def stop(self):
-        """Request graceful stop."""
         self._log("Stop requested")
         self._stop_event.set()
         self._set_status("stopping")
@@ -86,23 +82,17 @@ class CocBot:
     # ---- Sleeping with stop awareness ----
 
     def _sleep(self, seconds: float):
-        """
-        Sleep in small chunks so we can exit quickly when stop is requested.
-        Preserves timing close to the original notebook sleep calls.
-        """
         deadline = time.time() + seconds
         while time.time() < deadline:
             if self._stop_event.is_set():
                 break
             time.sleep(0.1)
 
-    # ---- Vision helpers that replicate old detect() ----
+    # ---- Vision helpers ----
 
     def _detect_single(self, class_name: str):
         """
-        Replicates listMode=False behaviour:
-        - retries up to max_retries
-        - returns absolute screen coordinates (x, y)
+        Returns device-relative coordinates (cx, cy).
         """
         max_retries = self.config.max_retries
         for attempt in range(1, max_retries + 1):
@@ -118,19 +108,13 @@ class CocBot:
             detections = self.vision.detect(frame, [class_name])
             if class_name in detections and detections[class_name]:
                 cx, cy = detections[class_name][0]
-                # Convert to absolute screen coords exactly like the old notebook
-                return cx + self.window.win_left, cy + self.window.win_top
+                return cx, cy
 
         raise RuntimeError(
             f"detect() could not find '{class_name}' after {max_retries} attempts"
         )
 
     def _scan_treasures(self):
-        """
-        Replicates:
-        detect(classin=['gold','elixir','d_elixir'], listMode=True, store_value=True)
-        Returns dict: {class_name: str_value, ...}
-        """
         max_retries = self.config.max_retries
         targets = [self.config.GOLD, self.config.ELIXIR, self.config.D_ELIXIR]
 
@@ -162,11 +146,6 @@ class CocBot:
         )
 
     def _scan_base_layout(self):
-        """
-        Replicates:
-        detect(classin=['end_btn','s_goblin','elixirs','nxt_btn','golds','d_elixirs'], listMode=True)
-        Returns dict: {class_name: [(cx_rel, cy_rel), ...], ...}
-        """
         max_retries = self.config.max_retries
         targets = [
             self.config.END_BTN,
@@ -199,10 +178,6 @@ class CocBot:
         )
 
     def _scan_post_game(self):
-        """
-        Replicates:
-        detect(classin=['post_gold','post_elixir','post_d_elixir'], listMode=True, store_value=True)
-        """
         max_retries = self.config.max_retries
         targets = [self.config.POST_GOLD, self.config.POST_ELIXIR, self.config.POST_D_ELIXIR]
 
@@ -233,14 +208,9 @@ class CocBot:
             f"Could not find post-game resources after {max_retries} attempts"
         )
 
-    # ---- Attack logic (preserved verbatim) ----
+    # ---- Attack logic ----
 
     def _initiate_attack(self, base: dict):
-        """
-        Original initiate_attack logic.
-        base dict comes from _scan_base_layout():
-          {class_name: [(cx, cy), ...], ...}
-        """
         limit = base[self.config.END_BTN][0][1]
         attack_coords = []
         for a in base.get(self.config.GOLDS, []):
@@ -250,14 +220,15 @@ class CocBot:
         self._log(f"Attack coords: {attack_coords}")
         self.auto.click(base[self.config.S_GOBLIN][0])
 
+        # Deploy across the base (device-relative coordinates)
+        screen_w = self.window.win_width or 1080
         for k in attack_coords:
-            # Exact formula from notebook (preserved even if it looks like width/right-edge mix)
-            for a in range(self.window.win_left, self.window.win_width - 100, 50):
+            for a in range(50, screen_w - 100, 50):
                 if self._stop_event.is_set():
                     return
                 self.auto.click(a, k)
 
-    # ---- Farm loop (preserved notebook behaviour) ----
+    # ---- Farm loop ----
 
     def _farm_loop(self, targets, goals):
         gtarget, etarget, detarget = targets
@@ -269,7 +240,6 @@ class CocBot:
         self._set_status("farming")
         try:
             while not self._stop_event.is_set():
-                # Check total goals
                 if (
                     totals["gold"] > g_goal
                     and totals["elixir"] > e_goal
@@ -303,9 +273,9 @@ class CocBot:
                     base = self._scan_base_layout()
                     base_treasure = self._scan_treasures()
 
-                    current_gold = int(base_treasure.get(self.config.GOLD, 0))
-                    current_elixir = int(base_treasure.get(self.config.ELIXIR, 0))
-                    current_delixir = int(base_treasure.get(self.config.D_ELIXIR, 0))
+                    current_gold = int(base_treasure.get(self.config.GOLD, 0) or 0)
+                    current_elixir = int(base_treasure.get(self.config.ELIXIR, 0) or 0)
+                    current_delixir = int(base_treasure.get(self.config.D_ELIXIR, 0) or 0)
 
                     self._log(f"Gold rn: {current_gold}")
 
@@ -314,7 +284,6 @@ class CocBot:
                         and current_delixir >= detarget
                         and current_elixir >= etarget
                     ):
-                        # Attack
                         self._initiate_attack(base)
 
                         end = base.get(self.config.END_BTN)
@@ -329,23 +298,21 @@ class CocBot:
                         self._sleep(1)
 
                         post_game = self._scan_post_game()
-                        totals["gold"] += int(post_game.get(self.config.POST_GOLD, 0))
-                        totals["elixir"] += int(post_game.get(self.config.POST_ELIXIR, 0))
+                        totals["gold"] += int(post_game.get(self.config.POST_GOLD, 0) or 0)
+                        totals["elixir"] += int(post_game.get(self.config.POST_ELIXIR, 0) or 0)
                         totals["delixir"] += int(
-                            post_game.get(self.config.POST_D_ELIXIR, 0)
+                            post_game.get(self.config.POST_D_ELIXIR, 0) or 0
                         )
                         self._show_totals(totals)
 
                         self.auto.click(self._detect_single(self.config.RETURN_HOME))
                         search = False
                     else:
-                        # Next base
                         nxt = base.get(self.config.NXT_BTN)
                         if nxt:
                             self.auto.click(nxt[0])
                             self._sleep(1.5)
                         else:
-                            # Original notebook behaviour: rescan layout (no-op except consuming a loop)
                             self._scan_base_layout()
 
         except RuntimeError as e:

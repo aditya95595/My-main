@@ -1,143 +1,174 @@
-# COC Auto Farm Bot – VPS / ADB Edition
+# COC Auto Farm Bot – Oracle Cloud / ADB Edition
 
-A thread-safe Clash of Clans farming bot that runs on a **Linux VPS** and controls a real Android phone (or emulator) over **ADB**.
+A thread-safe Clash of Clans farming bot designed to run on **Oracle Cloud Free Tier** (Ampere A1 ARM) and control a real Android phone over **ADB**.
 
-This is the adapted version of the original Windows + LDPlayer bot. It no longer depends on `pywinauto` or a Windows desktop.
+No Windows PC required.
 
-## Features
+---
 
-- Automated farming (search bases → read resources with EasyOCR → attack when thresholds are met)
-- Works with real Android phones via USB or wireless ADB
-- Also works with emulators that expose ADB
-- Thread-safe Tkinter GUI
-- Graceful stop
-- Retry logic for detections
+## Oracle Cloud Free Tier Notes (2026)
 
-## Requirements
+- Shape: **VM.Standard.A1.Flex** (Ampere ARM)
+- Current free limit: **2 OCPU + 12 GB RAM**
+- OS: Ubuntu 22.04 or 24.04 (recommended)
+- No GPU → `gpu = False` is already the default
+- Capacity is often full → you may need to retry creating the instance
 
-### On the VPS (Linux)
+12 GB RAM is usable. YOLO + EasyOCR will run slower than on a GPU machine, but it works.
 
-- Python 3.9+
-- ADB (`sudo apt update && sudo apt install -y adb`)
-- Enough RAM (recommended **6–8 GB** for YOLO + EasyOCR)
+---
 
-### On the Android phone
+## 1. Create the Oracle Instance
 
-- USB Debugging enabled (Developer options)
-- Or Wireless ADB enabled
-- Clash of Clans installed and logged in
+1. Go to [Oracle Cloud Free Tier](https://www.oracle.com/cloud/free/)
+2. Create a new **Compute Instance**
+3. Choose:
+   - Image: **Canonical Ubuntu 22.04** or **24.04**
+   - Shape: **VM.Standard.A1.Flex**
+   - OCPU: **2**
+   - Memory: **12 GB**
+4. Add your SSH public key
+5. Create the instance and note the public IP
 
-## Installation on VPS
+---
+
+## 2. First login & basic setup
 
 ```bash
-# 1. Clone / upload the project
+ssh ubuntu@YOUR_ORACLE_PUBLIC_IP
+
+# Update system
+sudo apt update && sudo apt upgrade -y
+
+# Install required packages
+sudo apt install -y adb python3-pip python3-venv python3-tk xvfb git unzip
+```
+
+---
+
+## 3. Install the bot
+
+```bash
 git clone https://github.com/aditya95595/My-main.git
 cd My-main
 
-# 2. Create virtual environment
 python3 -m venv venv
 source venv/bin/activate
 
-# 3. Install dependencies
+pip install --upgrade pip
 pip install -r requirements.txt
-
-# 4. Place your YOLO model
-mkdir -p models
-# copy best.pt into models/best.pt
 ```
 
-## Connect your phone
-
-### Option A – USB (easiest for first test)
-
-1. Connect phone to a computer that can reach the VPS (or use USB over IP solutions).
-2. Enable USB debugging and authorize the computer.
-3. On the VPS run:
-   ```bash
-   adb devices
-   ```
-   You should see your device listed as `device`.
-
-### Option B – Wireless ADB (recommended for long-term)
-
-1. On the phone enable Wireless debugging / ADB over network.
-2. Note the IP and port (usually `192.168.x.x:5555` or similar).
-3. On the VPS:
-   ```bash
-   adb connect YOUR_PHONE_IP:5555
-   adb devices
-   ```
-
-You can also set the device in `config.py`:
-
-```python
-adb_device: str = "192.168.1.25:5555"   # or leave None for auto-detect
-```
-
-## Running the bot
-
-### With GUI (needs a display)
-
-If your VPS has no monitor, use Xvfb:
+Place your trained YOLO model:
 
 ```bash
-sudo apt install -y xvfb
+mkdir -p models
+# Upload best.pt into models/best.pt (use scp or any method)
+```
+
+---
+
+## 4. Connect your Android phone (Wireless ADB)
+
+On your phone:
+
+1. Enable **Developer options** → **Wireless debugging**
+2. Note the IP and port (example: `192.168.1.25:45679`)
+
+On the Oracle VPS:
+
+```bash
+adb connect YOUR_PHONE_IP:PORT
+adb devices
+```
+
+You should see the device listed as `device`.
+
+You can also hard-code it in `config.py`:
+
+```python
+adb_device = "192.168.1.25:45679"
+```
+
+---
+
+## 5. Run the bot
+
+Because Oracle instances have no monitor, use Xvfb:
+
+```bash
+source venv/bin/activate
 xvfb-run -a python main.py
 ```
 
-Or use a VNC / RDP solution and run normally:
+The GUI will start in the background. You can also run it inside `tmux` or `screen` so it survives SSH disconnect:
 
 ```bash
-python main.py
+sudo apt install -y tmux
+tmux new -s coc
+xvfb-run -a python main.py
+# Detach with Ctrl+B then D
 ```
 
-## Configuration
+---
 
-Edit `config.py`:
+## Configuration (`config.py`)
 
-| Setting        | Meaning                                      | Default          |
-|----------------|----------------------------------------------|------------------|
-| `model_path`   | Path to YOLO `.pt` file                      | `models/best.pt` |
-| `adb_device`   | Device serial or `IP:port` (None = auto)     | `None`           |
-| `conf`         | YOLO confidence threshold                    | `0.5`            |
-| `gpu`          | Use GPU (almost always `False` on VPS)       | `False`          |
-| `max_retries`  | How many times to retry a detection          | `4`              |
+| Setting       | Recommended for Oracle      | Notes                          |
+|---------------|-----------------------------|--------------------------------|
+| `gpu`         | `False`                     | Oracle has no GPU              |
+| `adb_device`  | your phone IP:port or None  | Auto-detect if only one device |
+| `conf`        | `0.45` – `0.5`              | Lower if detections miss often |
+| `max_retries` | `4`                         | Keep default                   |
 
-## Architecture changes from original
+---
 
-| Original (Windows)      | New (VPS / ADB)              |
-|-------------------------|------------------------------|
-| `pywinauto`             | ADB (`adb exec-out screencap`) |
-| `pyautogui`             | `adb shell input tap`        |
-| Window title matching   | Device serial / wireless ADB |
-| Screen coordinates + offset | Pure device coordinates   |
+## Important Oracle tips
 
-## Important warnings
+- **Keep the instance alive** – Oracle can reclaim idle Always Free instances. Run a simple keep-alive (ping or a small script) if needed.
+- **Outbound traffic** is free up to the monthly limit (usually enough).
+- **ARM architecture** – All current packages (`ultralytics`, `easyocr`, `opencv-python-headless`) support ARM64.
+- If `pip install` fails on some packages, try:
+  ```bash
+  pip install --upgrade pip setuptools wheel
+  pip install -r requirements.txt
+  ```
 
-- Automating Clash of Clans violates Supercell’s Terms of Service.
-- Accounts can be permanently banned.
-- Use at your own risk, preferably on a secondary account.
-- Keep the phone charged and connected to a stable network.
+---
 
 ## Troubleshooting
 
-**“No ADB device found”**
+**No ADB device found**
 ```bash
 adb kill-server
 adb start-server
+adb connect YOUR_PHONE_IP:PORT
 adb devices
 ```
-Accept the RSA fingerprint on the phone.
+Accept the RSA fingerprint on the phone the first time.
 
-**Slow detections**
-- VPS has no GPU → set `gpu = False` (already default).
-- Lower resolution on the phone if possible.
-- 8 GB RAM VPS is strongly recommended.
+**Out of memory / very slow**
+- Close other programs on the phone
+- Lower phone resolution if possible
+- 12 GB is the minimum comfortable size for continuous YOLO + EasyOCR
 
-**GUI does not open**
+**GUI / display errors**
+Always use:
 ```bash
 xvfb-run -a python main.py
 ```
+
+**Instance keeps getting terminated**
+Oracle reclaims idle free instances. Keep a light process running or use a simple cron job that pings something every few minutes.
+
+---
+
+## Warning
+
+Automating Clash of Clans violates Supercell’s Terms of Service.  
+Your account can be permanently banned. Use only on accounts you are willing to lose.
+
+---
 
 ## License
 

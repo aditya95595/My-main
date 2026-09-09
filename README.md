@@ -1,172 +1,144 @@
-# COC Auto Farm Bot
+# COC Auto Farm Bot – VPS / ADB Edition
 
-A **thread-safe** automation bot for Clash of Clans farming on LDPlayer or any compatible Android emulator/runtime. Uses YOLO object detection and EasyOCR to automatically search for bases, read resource values, and initiate attacks.
+A thread-safe Clash of Clans farming bot that runs on a **Linux VPS** and controls a real Android phone (or emulator) over **ADB**.
+
+This is the adapted version of the original Windows + LDPlayer bot. It no longer depends on `pywinauto` or a Windows desktop.
 
 ## Features
 
-- **Automated Farming**: Searches for bases, reads resource quantities (Gold, Elixir, Dark Elixir), and attacks when thresholds are met
-- **Thread-Safe GUI**: Tkinter interface communicates with bot worker via queue (no crashes from threading)
-- **Graceful Stop**: Press **F12** to stop farming cleanly at any time
-- **Retry Logic**: Up to 4 attempts per detection to handle timing issues
-- **Defensive Programming**: Safe `.get()` defaults, OCR error handling, focus fallback tricks
-- **Logging**: File + console logs to `logs/bot.log`
+- Automated farming (search bases → read resources with EasyOCR → attack when thresholds are met)
+- Works with real Android phones via USB or wireless ADB
+- Also works with emulators that expose ADB
+- Thread-safe Tkinter GUI
+- Graceful stop
+- Retry logic for detections
 
 ## Requirements
 
-### Software
-- **Python 3.8+**
-- **Android emulator / Android runtime** (configure the window title regex in `config.py`; the default matches LDPlayer but can be changed for any emulator)
-- **NVIDIA GPU** (recommended for YOLO inference; CPU mode supported)
+### On the VPS (Linux)
 
-### Python Dependencies
-See `requirements.txt` for full list:
-- `ultralytics` (YOLO)
-- `easyocr` (OCR)
-- `pywinauto` (Window automation)
-- `pyautogui` (Mouse/keyboard)
-- `keyboard` (F12 hotkey)
-- `opencv-python` (Image processing)
-- `numpy` (Arrays)
+- Python 3.9+
+- ADB (`sudo apt update && sudo apt install -y adb`)
+- Enough RAM (recommended **6–8 GB** for YOLO + EasyOCR)
 
-## Installation
+### On the Android phone
 
-### 1. Clone the Repository
+- USB Debugging enabled (Developer options)
+- Or Wireless ADB enabled
+- Clash of Clans installed and logged in
+
+## Installation on VPS
+
 ```bash
-git clone https://github.com/anugrhaswi/Coc-Auto-Farm.git
-cd Coc-Auto-Farm
-```
+# 1. Clone / upload the project
+git clone https://github.com/aditya95595/My-main.git
+cd My-main
 
-### 2. Create Virtual Environment
-```bash
-python -m venv venv
-venv\Scripts\activate  # Windows
-# or
-source venv/bin/activate  # macOS/Linux
-```
+# 2. Create virtual environment
+python3 -m venv venv
+source venv/bin/activate
 
-### 3. Install Dependencies
-```bash
+# 3. Install dependencies
 pip install -r requirements.txt
+
+# 4. Place your YOLO model
+mkdir -p models
+# copy best.pt into models/best.pt
 ```
 
-### 4. Obtain Model
-- Place your `best.pt` YOLO model at the root: `cocbot/best.pt`
-- Or update `config.py` with the correct path
+## Connect your phone
 
-## Usage
+### Option A – USB (easiest for first test)
 
-### Start the Bot
+1. Connect phone to a computer that can reach the VPS (or use USB over IP solutions).
+2. Enable USB debugging and authorize the computer.
+3. On the VPS run:
+   ```bash
+   adb devices
+   ```
+   You should see your device listed as `device`.
+
+### Option B – Wireless ADB (recommended for long-term)
+
+1. On the phone enable Wireless debugging / ADB over network.
+2. Note the IP and port (usually `192.168.x.x:5555` or similar).
+3. On the VPS:
+   ```bash
+   adb connect YOUR_PHONE_IP:5555
+   adb devices
+   ```
+
+You can also set the device in `config.py`:
+
+```python
+adb_device: str = "192.168.1.25:5555"   # or leave None for auto-detect
+```
+
+## Running the bot
+
+### With GUI (needs a display)
+
+If your VPS has no monitor, use Xvfb:
+
+```bash
+sudo apt install -y xvfb
+xvfb-run -a python main.py
+```
+
+Or use a VNC / RDP solution and run normally:
+
 ```bash
 python main.py
 ```
 
-This launches a Tkinter GUI with:
-- **Thresholds**: Minimum resources to look for (e.g., 200k Gold, 200k Elixir)
-- **Goals**: Total resources to farm before stopping (e.g., 5M Gold, 5M Elixir)
-- **Start/Stop buttons**: Launch or cancel the farm
-- **Log viewer**: Real-time farming activity
-- **F12 hotkey**: Emergency stop
+## Configuration
 
-### Configuration
-Edit `config.py` to adjust:
-- `window_title_re`: LDPlayer window regex (default: `".*LDPlayer.*"`)
-- `conf`: YOLO confidence threshold (default: 0.5)
-- `gpu`: Use GPU for inference (default: True)
-- `max_retries`: Retry attempts per detection (default: 4)
-- `model_path`: Path to YOLO model (default: `"best.pt"`)
+Edit `config.py`:
 
-## Architecture
+| Setting        | Meaning                                      | Default          |
+|----------------|----------------------------------------------|------------------|
+| `model_path`   | Path to YOLO `.pt` file                      | `models/best.pt` |
+| `adb_device`   | Device serial or `IP:port` (None = auto)     | `None`           |
+| `conf`         | YOLO confidence threshold                    | `0.5`            |
+| `gpu`          | Use GPU (almost always `False` on VPS)       | `False`          |
+| `max_retries`  | How many times to retry a detection          | `4`              |
 
-### Modules
+## Architecture changes from original
 
-| Module | Purpose |
-|--------|---------|
-| `main.py` | Entry point; wires all components together |
-| `config.py` | Configuration dataclass |
-| `window_manager.py` | `WindowManager`: emulator connection, focus, screenshot capture |
-| `vision.py` | `VisionManager`: YOLO detection, EasyOCR reading |
-| `automation.py` | `AutomationController`: Thin wrapper around pyautogui |
-| `bot.py` | `CocBot`: Farming brain; runs in worker thread, checks `_stop_event` every sleep |
-| `gui.py` | `BotGUI`: Tkinter interface on main thread; drains queue every 150ms |
-| `logger.py` | `setup_logging()`: File + console logging |
+| Original (Windows)      | New (VPS / ADB)              |
+|-------------------------|------------------------------|
+| `pywinauto`             | ADB (`adb exec-out screencap`) |
+| `pyautogui`             | `adb shell input tap`        |
+| Window title matching   | Device serial / wireless ADB |
+| Screen coordinates + offset | Pure device coordinates   |
 
-### Thread Model
-- **Main thread**: GUI (Tkinter), queue polling, keyboard hotkey
-- **Worker thread**: Farming loop (bot), window automation, vision inference
-- **Communication**: Thread-safe `queue.Queue` (no `root.after()` from worker thread)
+## Important warnings
 
-## Key Design Decisions
-
-### Why Thread-Safe Queue?
-The original code crashed with `RuntimeError: main thread is not in main loop` when the worker thread called `root.after()`. The queue-based approach is the official Python solution: worker puts messages, main thread polls and updates GUI.
-
-### Why Retry Loop?
-Game timing is unpredictable. Bases load asynchronously, buttons appear on delay. Retrying up to 4x with 0.5–1s waits handles this robustly.
-
-### Why Retry Inside VisionManager Returns Frame-Relative Coords?
-`vision.detect()` returns coordinates relative to the screenshot frame (0,0 origin). The bot layer adds `window.win_left` and `window.win_top` to convert to screen coordinates for clicking. This separation keeps vision pure (no window knowledge).
-
-### Why `.get()` Defaults?
-If OCR fails or detection misses a resource, using `.get(key, 0)` prevents KeyErrors. Graceful degradation over crashes.
-
-## Known Limitations
-
-- **Windows only**: Uses `pywinauto` (Windows API)
-- **Emulator-only**: Designed for LDPlayer; other emulators may have different window titles
-- **Single strategy**: Only supports goblin-based farming; dragon/other strategies not yet implemented
-- **YOLO model required**: You must provide a trained `best.pt` model with your game's object classes
+- Automating Clash of Clans violates Supercell’s Terms of Service.
+- Accounts can be permanently banned.
+- Use at your own risk, preferably on a secondary account.
+- Keep the phone charged and connected to a stable network.
 
 ## Troubleshooting
 
-### "Failed to connect to LDPlayer window"
-- Ensure LDPlayer is running
-- Window title must contain "LDPlayer" (check in your emulator settings)
-- Update `config.window_title_re` if needed
-
-### "Failed to load YOLO model"
-- Verify `best.pt` exists at the path in `config.model_path`
-- Ensure the model is a valid YOLOv8 `.pt` file
-
-### "Could not find [class_name] after X attempts"
-- YOLO may be under-confident; lower `config.conf` (e.g., 0.4)
-- Ensure LDPlayer is focused and unobstructed
-- Check bot logs in `logs/bot.log`
-
-### High memory usage
-- YOLO and EasyOCR are memory-intensive
-- Close other applications
-- Enable GPU mode for faster inference and lower CPU usage
-
-## Development
-
-### Running Tests
+**“No ADB device found”**
 ```bash
-# No formal test suite yet; run the GUI and test manually
-python main.py
+adb kill-server
+adb start-server
+adb devices
 ```
+Accept the RSA fingerprint on the phone.
 
-### Extending
-- To add a new farming strategy, subclass `CocBot` or add a new method to `_farm_loop()`
-- To add humanization (mouse jitter, random delays), extend `AutomationController`
-- To support other emulators, update `window_manager.py` connection logic
+**Slow detections**
+- VPS has no GPU → set `gpu = False` (already default).
+- Lower resolution on the phone if possible.
+- 8 GB RAM VPS is strongly recommended.
+
+**GUI does not open**
+```bash
+xvfb-run -a python main.py
+```
 
 ## License
 
-MIT License — See `LICENSE` file.
-
-## Author
-
-**Anugrha Bhujel** ([GitHub](https://github.com/anugrhaswi), [LinkedIn](https://www.linkedin.com/in/anugrhaswi/))
-
----
-
-## Journey
-
-This bot is the result of iterative learning:
-1. **Window Management**: Failed with `pygetwindow`, succeeded with `pywinauto` + fallback focus trick
-2. **OCR Reliability**: Added safe defaults to handle empty OCR results
-3. **Detection Retries**: Built max-4-attempt loop to handle asynchronous game loading
-4. **Threading**: Fixed `RuntimeError` by replacing `root.after()` with queue-based messaging
-5. **Architecture**: Modularized globals into focused classes for maintainability and testability
-
-This repository contains the production-ready `Coc-Auto-Farm` code. The original notebook and experimental drafts are not included in the public repo.
+MIT
